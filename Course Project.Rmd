@@ -1,0 +1,145 @@
+---
+title: "Qualitative Activity Recognition of Weight Lifting Exercises"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+This report summarizes the process of building a machine learning algorithm to predict whether participants perform Unilateral Dumbbell Biceps Curl correctly using [accelerometers data](http://groupware.les.inf.puc-rio.br/har#dataset#ixzz6R4QthWXd).
+
+The quality of the exercise is categorized into 5 classes (response variable *"classe"*):
+
+* Class A - exactly according to the specification
+
+* Class B - throwing the elbows to the front
+
+* Class C - lifting the dumbbell only halfway
+
+* Class D - lowering the dumbbell only halfway
+
+* Class E - throwing the hips to the front
+
+The selected model which utilizes Random Forest algorithm has 99.25% prediction accuracy on test data and 100% prediction accuracy on 20 test cases provided.
+
+## Step 1 - Loading Data
+```{r load data}
+# Downloading the datasets
+urlTrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urlTest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(urlTrain, "pml-training.csv", method="curl")
+download.file(urlTest, "pml-testing.csv", method="curl")
+
+## Reading data into R
+training <- read.csv("./pml-training.csv", sep=",", header=T, na.strings=c("","NA","#DIV/0!"), stringsAsFactors = TRUE)
+testing <- read.csv("./pml-testing.csv", sep=",", header=T,na.strings=c("","NA","#DIV/0!"),stringsAsFactors = TRUE)
+dim(training)
+dim(testing)
+```
+
+## Step 2 - Cleaning Data
+The following procedures are applied for data preprocessing:
+
+1. Removing 6 variables with little or no predictive value (*x, cvtd_timestamp, user_name, raw_timestamp_part_1, raw_timestamp_part_2, num_window*)
+
+2. Removing 100 variables with more than 50% missing values
+
+3. Removing 1 variable with zero covariates
+
+4. Removing 21 variables with high correlations
+
+```{r data cleaning}
+# Remove variables with no predictive value
+training1 <- training[,-c(1:5,7)]
+
+# Check which variables contain more than 50% missing values
+missingvalues <- sapply(training1, function(x) sum(is.na(x))/length(x))*100
+mvalcols <- names(missingvalues[missingvalues>0.5])
+
+# Check if response variable classe has missing values
+missingvalues[names(missingvalues)=="classe"]
+
+# Remove variables with more than 50% missing values
+training2 <- training1[,-which(names(training1) %in% mvalcols)]
+
+# Removing variables with zero covariates
+library(caret)
+nzvs <- nearZeroVar(training2)
+training3 <- training2[, -nzvs]
+
+# Removing variables with correlations above 0.75
+vars <- training3[,-53]
+highcorr <- findCorrelation(cor(vars), cutoff = .75)
+training4 <- training3[,-highcorr]
+str(training4)
+```
+
+## Step 3 - Building models
+Cleaned training data is split into two subsets - 70% data for model training and 30% data for model testing. Cross-validation is used to assess and tune predictive models. Here we use 5-folds cross validation repeated 3 times.
+
+The following algorithms are used to build models with training data.
+
+1. Random Forest
+2. Stochastic Gradient Boosting
+3. Bagging
+
+```{r modelling}
+# Partitioning the cleaned dataset into 70% training and 30% testing.
+set.seed(125)
+inTrain <- createDataPartition(y=training4$classe, p=0.70, list=FALSE)
+train <- training4[inTrain,]
+test <- training4[-inTrain,]
+
+# 5-folds cross validation repeated 3 times
+modctrl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 3,
+                           verboseIter=FALSE,
+                           allowParallel=TRUE)
+
+# Model 1 - Random Forest
+Mod1 <- train(classe ~ ., data = train, method = "rf", trControl= modctrl)
+print(Mod1, digits = 3)
+
+# Model 2 - Gradient Boosting
+Mod2 <- train(classe ~ ., data = train, method = "gbm", verbose=FALSE, trControl= modctrl)
+print(Mod2, digits = 3)
+
+# Model 3 - Bagging
+Mod3 <- train(classe ~ ., data = train, method = "treebag", trControl= modctrl)
+print(Mod3, digits = 3)
+```
+
+## Step 4 - Testing models
+Model performance is evaluated using test data. It appears that Model 1 (Random Forest) has the highest prediction accuracy (99.25%) and the lowest out-of-sample error. Model 1 will be used to make predictions for the test cases provided.
+
+```{r testing 1}
+# Model 1 Performance (Random Forest)
+Pred1 <- predict(Mod1,test)
+confusionMatrix(Pred1, test$classe)
+
+```
+```{r testing 2}
+
+# Model 2 Performance (Gradient Boosting)
+Pred2 <- predict(Mod2,test)
+confusionMatrix(Pred2, test$classe)
+
+```
+```{r testing 3}
+
+# Model 3 Performance (Bagging)
+Pred3 <- predict(Mod3,test)
+confusionMatrix(Pred3, test$classe)
+
+```
+
+## Step 5 - Predictions
+
+Below are the predictions results for the 20 test cases using Model 1.
+
+```{r predictions}
+predict(Mod1, testing)
+```
